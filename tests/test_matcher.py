@@ -62,6 +62,17 @@ class TestMatcher:
         assert results[1].category == "Includes"  # -I/tmp/foo
         assert results[2].category == "Default"  # main.c
 
+    def test_executable_with_preset(self, sample_config):
+        """Test that first token is Executable even when executable is preset."""
+        matcher = Matcher(sample_config, executable="gcc")
+        tokens = tokenize("gcc -I/tmp/foo main.c")
+
+        results = matcher.match_tokens(tokens)
+
+        assert len(results) == 3
+        assert results[0].category == "Executable"  # gcc should still be Executable
+        assert results[1].category == "Includes"
+
     def test_program_specific_flags(self, sample_config):
         """Test program-specific flag matching."""
         matcher = Matcher(sample_config, executable="gcc")

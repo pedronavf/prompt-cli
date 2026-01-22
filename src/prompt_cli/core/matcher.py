@@ -150,7 +150,7 @@ class Matcher:
         results: list[MatchResult] = []
 
         for i, token in enumerate(tokens):
-            if i == 0 and self.executable is None:
+            if i == 0:
                 # First token is the executable - special category
                 results.append(
                     MatchResult(
