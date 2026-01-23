@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from prompt_cli.core.programs import ProgramMatch, detect_program
+from prompt_cli.core.programs import ProgramMatch, detect_program, find_compiler
 
 if TYPE_CHECKING:
     from prompt_cli.config.schema import Config, Flag
@@ -15,12 +15,16 @@ if TYPE_CHECKING:
 
 @dataclass
 class CaptureGroup:
-    """A captured group from a regex match."""
+    """A captured group from a regex match.
+
+    Supports both numeric and named capture groups.
+    """
 
     value: str
     start: int  # Relative to token start
     end: int  # Relative to token start
-    group_index: int
+    group_index: int  # Numeric index (1-based for capture groups, 0 for whole match)
+    name: str | None = None  # Named group name (e.g., "flag", "value")
 
 
 @dataclass
@@ -37,6 +41,38 @@ class MatchResult:
     def is_default(self) -> bool:
         """Check if this token fell through to default category."""
         return self.category.lower() == "default"
+
+    def get_group(self, name: str) -> CaptureGroup | None:
+        """Get a capture group by name.
+
+        Args:
+            name: The named group name (e.g., "flag", "value")
+
+        Returns:
+            The CaptureGroup or None if not found
+        """
+        for group in self.groups:
+            if group.name == name:
+                return group
+        return None
+
+    def get_group_value(self, name: str, default: str = "") -> str:
+        """Get a capture group value by name.
+
+        Args:
+            name: The named group name
+            default: Default value if group not found
+
+        Returns:
+            The group value or default
+        """
+        group = self.get_group(name)
+        return group.value if group else default
+
+    @property
+    def named_groups(self) -> dict[str, str]:
+        """Get all named groups as a dictionary."""
+        return {g.name: g.value for g in self.groups if g.name}
 
 
 class Matcher:
@@ -120,20 +156,33 @@ class Matcher:
         )
 
     def _extract_groups(self, match: re.Match[str], token: Token) -> list[CaptureGroup]:
-        """Extract capture groups from a regex match."""
+        """Extract capture groups from a regex match.
+
+        Supports both numeric and named capture groups.
+        Named groups like (?P<flag>...) will have their name stored.
+        """
         groups: list[CaptureGroup] = []
 
-        # Group 0 is the entire match
+        # Get named groups mapping: name -> group_index
+        # The pattern object stores group names
+        named_groups = match.re.groupindex  # dict of name -> group_number
+
+        # Invert to get group_number -> name
+        index_to_name: dict[int, str] = {v: k for k, v in named_groups.items()}
+
+        # Extract all capture groups
         for i, group_value in enumerate(match.groups(), start=1):
             if group_value is not None:
                 start = match.start(i)
                 end = match.end(i)
+                name = index_to_name.get(i)  # None if not a named group
                 groups.append(
                     CaptureGroup(
                         value=group_value,
                         start=start,
                         end=end,
                         group_index=i,
+                        name=name,
                     )
                 )
 
@@ -145,6 +194,7 @@ class Matcher:
                     start=0,
                     end=len(token.value),
                     group_index=0,
+                    name=None,
                 )
             )
 
@@ -153,17 +203,78 @@ class Matcher:
     def match_tokens(self, tokens: list[Token]) -> list[MatchResult]:
         """Match all tokens.
 
+        Handles launchers (ccache, distcc, etc.) by:
+        - Detecting the actual compiler using find_compiler
+        - Labeling launcher tokens as "Launcher" category
+        - Labeling launcher arguments as "LauncherArg"
+        - Labeling the compiler as "Executable"
+
         Args:
             tokens: List of tokens to match
 
         Returns:
             List of MatchResult objects
         """
+        if not tokens:
+            return []
+
         results: list[MatchResult] = []
 
+        # Find the actual compiler (handles launchers)
+        compiler_match = find_compiler(tokens, self.config)
+
+        # Update our program_match if find_compiler found something different
+        if compiler_match and compiler_match.source != "unknown":
+            self.program_match = compiler_match
+            # Recompile patterns for the detected program
+            self._compiled_patterns.clear()
+            self._compile_patterns()
+
+        # Determine special token indices
+        compiler_index = compiler_match.token_index if compiler_match else 0
+        launcher_end = 0
+        if compiler_match and compiler_match.launcher:
+            launcher_end = compiler_match.launcher.args_end_index
+
         for i, token in enumerate(tokens):
-            if i == 0:
-                # First token is the executable - special category
+            if compiler_match and compiler_match.launcher and i == compiler_match.launcher.token_index:
+                # This is the launcher
+                results.append(
+                    MatchResult(
+                        token=token,
+                        category="Launcher",
+                        flag=None,
+                        groups=[
+                            CaptureGroup(
+                                value=token.value,
+                                start=0,
+                                end=len(token.value),
+                                group_index=0,
+                            )
+                        ],
+                        matched=True,
+                    )
+                )
+            elif compiler_match and compiler_match.launcher and i > compiler_match.launcher.token_index and i < launcher_end:
+                # This is a launcher argument
+                results.append(
+                    MatchResult(
+                        token=token,
+                        category="LauncherArg",
+                        flag=None,
+                        groups=[
+                            CaptureGroup(
+                                value=token.value,
+                                start=0,
+                                end=len(token.value),
+                                group_index=0,
+                            )
+                        ],
+                        matched=True,
+                    )
+                )
+            elif i == compiler_index:
+                # This is the actual compiler/executable
                 results.append(
                     MatchResult(
                         token=token,

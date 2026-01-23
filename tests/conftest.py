@@ -70,3 +70,35 @@ aliases:
 def empty_config() -> Config:
     """Empty configuration for testing."""
     return Config()
+
+
+@pytest.fixture
+def named_groups_config() -> Config:
+    """Configuration with named capture groups for testing."""
+    yaml_content = """
+config:
+  color: true
+
+categories:
+  Includes:
+    colors: ["blue", "bright cyan"]
+  Libraries:
+    colors: ["magenta"]
+  Output:
+    colors: ["green"]
+  Default:
+    colors: ["white"]
+
+flags:
+  - category: Includes
+    regexps:
+      - "(?P<flag>-I|-isystem)(?P<path>.*)"
+  - category: Libraries
+    regexps:
+      - "(?P<flag>-L)(?P<path>.*)"
+      - "(?P<flag>-l)(?P<name>.+)"
+  - category: Output
+    regexps:
+      - "(?P<flag>-o)(?P<file>.*)"
+"""
+    return load_config_from_string(yaml_content)

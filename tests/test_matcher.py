@@ -130,3 +130,84 @@ class TestExpandCategoryMap:
         result = expand_category_map(sample_config, "Unknown")
 
         assert result == ["Unknown"]
+
+
+class TestNamedCaptureGroups:
+    """Tests for named capture group support."""
+
+    def test_named_groups_extracted(self, named_groups_config):
+        """Test that named groups are extracted correctly."""
+        matcher = Matcher(named_groups_config)
+        tokens = tokenize("-I/tmp/foo")
+
+        result = matcher.match_token(tokens[0])
+
+        assert result.matched
+        assert result.category == "Includes"
+        # Should have named groups
+        assert len(result.groups) == 2
+        flag_group = result.get_group("flag")
+        path_group = result.get_group("path")
+        assert flag_group is not None
+        assert flag_group.value == "-I"
+        assert path_group is not None
+        assert path_group.value == "/tmp/foo"
+
+    def test_get_group_value(self, named_groups_config):
+        """Test get_group_value helper method."""
+        matcher = Matcher(named_groups_config)
+        tokens = tokenize("-L/usr/lib")
+
+        result = matcher.match_token(tokens[0])
+
+        assert result.get_group_value("flag") == "-L"
+        assert result.get_group_value("path") == "/usr/lib"
+        assert result.get_group_value("nonexistent", "default") == "default"
+
+    def test_named_groups_dict(self, named_groups_config):
+        """Test named_groups property."""
+        matcher = Matcher(named_groups_config)
+        tokens = tokenize("-lm")
+
+        result = matcher.match_token(tokens[0])
+
+        assert result.named_groups == {"flag": "-l", "name": "m"}
+
+    def test_isystem_flag(self, named_groups_config):
+        """Test -isystem flag with named groups."""
+        matcher = Matcher(named_groups_config)
+        tokens = tokenize("-isystem/usr/include")
+
+        result = matcher.match_token(tokens[0])
+
+        assert result.matched
+        assert result.get_group_value("flag") == "-isystem"
+        assert result.get_group_value("path") == "/usr/include"
+
+    def test_output_flag(self, named_groups_config):
+        """Test -o flag with named groups."""
+        matcher = Matcher(named_groups_config)
+        tokens = tokenize("-otest")
+
+        result = matcher.match_token(tokens[0])
+
+        assert result.matched
+        assert result.category == "Output"
+        assert result.get_group_value("flag") == "-o"
+        assert result.get_group_value("file") == "test"
+
+    def test_groups_preserve_positions(self, named_groups_config):
+        """Test that group positions are correct."""
+        matcher = Matcher(named_groups_config)
+        tokens = tokenize("-I/tmp/foo")
+
+        result = matcher.match_token(tokens[0])
+
+        flag_group = result.get_group("flag")
+        path_group = result.get_group("path")
+        assert flag_group.start == 0
+        assert flag_group.end == 2  # "-I"
+        assert path_group.start == 2
+        assert path_group.end == 10  # "/tmp/foo"
+
+

@@ -4,10 +4,13 @@ import pytest
 
 from prompt_cli.core.programs import (
     detect_program,
+    find_compiler,
     get_program_names,
     _match_builtin,
     _match_config,
+    _is_launcher,
 )
+from prompt_cli.core.tokenizer import Token, QuoteType
 
 
 class TestMatchBuiltin:
@@ -157,3 +160,125 @@ class TestGetProgramNames:
         names = get_program_names(sample_config)
 
         assert names == sorted(names)
+
+
+class TestIsLauncher:
+    """Tests for launcher detection."""
+
+    def test_ccache_is_launcher(self):
+        """Test ccache is detected as launcher."""
+        result = _is_launcher("ccache")
+        assert result is not None
+        assert result[0] == "ccache"
+
+    def test_distcc_is_launcher(self):
+        """Test distcc is detected as launcher."""
+        result = _is_launcher("distcc")
+        assert result is not None
+        assert result[0] == "distcc"
+
+    def test_sccache_is_launcher(self):
+        """Test sccache is detected as launcher."""
+        result = _is_launcher("sccache")
+        assert result is not None
+        assert result[0] == "sccache"
+
+    def test_gcc_is_not_launcher(self):
+        """Test gcc is not detected as launcher."""
+        result = _is_launcher("gcc")
+        assert result is None
+
+    def test_case_insensitive(self):
+        """Test launcher detection is case insensitive."""
+        result = _is_launcher("CCACHE")
+        assert result is not None
+        assert result[0] == "ccache"
+
+
+class TestFindCompiler:
+    """Tests for find_compiler function."""
+
+    def _make_tokens(self, values: list[str]) -> list[Token]:
+        """Helper to create tokens from string values."""
+        tokens = []
+        pos = 0
+        for value in values:
+            tokens.append(Token(value=value, start=pos, end=pos + len(value), quote_type=QuoteType.NONE, raw=value))
+            pos += len(value) + 1
+        return tokens
+
+    def test_simple_gcc(self, sample_config):
+        """Test finding gcc as first token."""
+        tokens = self._make_tokens(["gcc", "-O2", "foo.c"])
+        result = find_compiler(tokens, sample_config)
+
+        assert result is not None
+        assert result.canonical_name == "gcc"
+        assert result.token_index == 0
+        assert result.launcher is None
+
+    def test_gcc_with_path(self, sample_config):
+        """Test finding gcc with full path."""
+        tokens = self._make_tokens(["/usr/bin/gcc", "-O2", "foo.c"])
+        result = find_compiler(tokens, sample_config)
+
+        assert result is not None
+        assert result.canonical_name == "gcc"
+        assert result.token_index == 0
+
+    def test_ccache_gcc(self, sample_config):
+        """Test finding gcc after ccache launcher."""
+        tokens = self._make_tokens(["ccache", "gcc", "-O2", "foo.c"])
+        result = find_compiler(tokens, sample_config)
+
+        assert result is not None
+        assert result.canonical_name == "gcc"
+        assert result.token_index == 1
+        assert result.launcher is not None
+        assert result.launcher.name == "ccache"
+        assert result.launcher.token_index == 0
+
+    def test_ccache_with_path(self, sample_config):
+        """Test finding gcc after ccache with paths."""
+        tokens = self._make_tokens(["/usr/bin/ccache", "/usr/bin/gcc", "-O2"])
+        result = find_compiler(tokens, sample_config)
+
+        assert result is not None
+        assert result.canonical_name == "gcc"
+        assert result.token_index == 1
+        assert result.launcher is not None
+
+    def test_cross_compiler_with_ccache(self, sample_config):
+        """Test finding cross-compiler after ccache."""
+        tokens = self._make_tokens(["ccache", "arm-linux-gnueabihf-gcc", "-O2"])
+        result = find_compiler(tokens, sample_config)
+
+        assert result is not None
+        assert result.canonical_name == "gcc"
+        assert result.matched_name == "arm-linux-gnueabihf-gcc"
+        assert result.token_index == 1
+
+    def test_distcc_gcc(self, sample_config):
+        """Test finding gcc after distcc launcher."""
+        tokens = self._make_tokens(["distcc", "gcc", "-O2", "foo.c"])
+        result = find_compiler(tokens, sample_config)
+
+        assert result is not None
+        assert result.canonical_name == "gcc"
+        assert result.token_index == 1
+        assert result.launcher.name == "distcc"
+
+    def test_empty_tokens(self, sample_config):
+        """Test with empty token list."""
+        result = find_compiler([], sample_config)
+        assert result is None
+
+    def test_unknown_program(self, sample_config):
+        """Test with unknown program."""
+        tokens = self._make_tokens(["my-custom-tool", "-a", "-b"])
+        result = find_compiler(tokens, sample_config)
+
+        assert result is not None
+        assert result.canonical_name == "my-custom-tool"
+        assert result.source == "unknown"
+        assert result.token_index == 0
