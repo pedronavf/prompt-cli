@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from prompt_cli.core.programs import ProgramMatch, detect_program
+
 if TYPE_CHECKING:
     from prompt_cli.config.schema import Config, Flag
     from prompt_cli.core.tokenizer import Token
@@ -49,12 +51,22 @@ class Matcher:
         """
         self.config = config
         self.executable = executable
+
+        # Detect program using two-tier matching
+        self.program_match: ProgramMatch | None = None
+        if executable:
+            self.program_match = detect_program(executable, config)
+
         self._compiled_patterns: dict[str, list[tuple[re.Pattern[str], Flag]]] = {}
         self._compile_patterns()
 
     def _compile_patterns(self) -> None:
         """Compile regex patterns from flags."""
-        flags = self.config.get_flags_for_program(self.executable or "")
+        # Use canonical program name if detected
+        program_name = ""
+        if self.program_match:
+            program_name = self.program_match.canonical_name
+        flags = self.config.get_flags_for_program(program_name)
 
         for flag in flags:
             category = flag.category.lower()

@@ -220,7 +220,11 @@ class CommandLineCompleter(Completer):
     def _complete_executables(
         self, partial: str, start_pos: int
     ) -> Iterable[Completion]:
-        """Complete executable names from PATH.
+        """Complete executable names.
+
+        Uses two-tier approach:
+        1. Known programs from config and built-in list
+        2. Fallback to PATH scanning
 
         Args:
             partial: Partial executable name
@@ -229,8 +233,27 @@ class CommandLineCompleter(Completer):
         Yields:
             Completion objects for executables
         """
-        path_dirs = os.environ.get("PATH", "").split(os.pathsep)
+        from prompt_cli.core.programs import get_program_names
+
         seen: set[str] = set()
+
+        # Tier 1: Known programs (fast)
+        for name in get_program_names(self.config):
+            if name in seen:
+                continue
+
+            if partial and not name.lower().startswith(partial.lower()):
+                continue
+
+            seen.add(name)
+            yield Completion(
+                text=name,
+                start_position=-len(partial),
+                display=name,
+            )
+
+        # Tier 2: PATH executables (slower, but catches everything else)
+        path_dirs = os.environ.get("PATH", "").split(os.pathsep)
 
         for path_dir in path_dirs:
             if not os.path.isdir(path_dir):
