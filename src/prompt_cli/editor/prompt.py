@@ -18,6 +18,7 @@ from prompt_cli.config.loader import load_config
 from prompt_cli.config.schema import Config
 from prompt_cli.core.matcher import MatchResult
 from prompt_cli.core.tokenizer import Token, tokenize
+from prompt_cli.editor.completer import CommandLineCompleter
 from prompt_cli.editor.keybindings import KeyBindingManager
 from prompt_cli.editor.lexer import CommandLineLexer
 from prompt_cli.editor.modes.duplicates import DuplicatesMode
@@ -57,11 +58,19 @@ class CommandLineEditor:
             executable=self._executable,
         )
 
-        # Create buffer
+        # Create completer
+        self.completer = CommandLineCompleter(
+            config=self.config,
+            matcher=self.lexer.matcher,
+        )
+
+        # Create buffer with completer
         self.buffer = Buffer(
             document=Document(command_line),
             multiline=False,
             name="command",
+            completer=self.completer,
+            complete_while_typing=False,  # Only complete on Tab
         )
 
         # Create key binding manager
