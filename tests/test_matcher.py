@@ -211,3 +211,63 @@ class TestNamedCaptureGroups:
         assert path_group.end == 10  # "/tmp/foo"
 
 
+class TestCaptureGroupsFromConfig:
+    """Tests for capture_groups array naming (without (?P<name>...) syntax)."""
+
+    def test_capture_groups_names_applied(self, capture_groups_config):
+        """Test that capture_groups from config are used to name groups."""
+        matcher = Matcher(capture_groups_config)
+        tokens = tokenize("-fsanitize=address")
+
+        result = matcher.match_token(tokens[0])
+
+        assert result.matched
+        assert result.category == "Sanitizers"
+        # Groups should be named from capture_groups config
+        assert result.get_group("flag") is not None
+        assert result.get_group("flag").value == "-f"
+        assert result.get_group("name") is not None
+        assert result.get_group("name").value == "sanitize="
+        assert result.get_group("value") is not None
+        assert result.get_group("value").value == "address"
+
+    def test_capture_groups_dict(self, capture_groups_config):
+        """Test named_groups property with capture_groups config."""
+        matcher = Matcher(capture_groups_config)
+        tokens = tokenize("-fsanitize=undefined")
+
+        result = matcher.match_token(tokens[0])
+
+        assert result.named_groups == {
+            "flag": "-f",
+            "name": "sanitize=",
+            "value": "undefined",
+        }
+
+    def test_mixed_named_and_config_groups(self):
+        """Test that regexp named groups take precedence over config."""
+        from prompt_cli.config.loader import load_config_from_string
+
+        # Config where regexp has one named group but capture_groups provides names for others
+        yaml = """
+flags:
+  - category: Test
+    regexps:
+      - "(?P<flag>-f)(sanitize=)(.*)"
+    capture_groups:
+      - should_be_ignored
+      - name
+      - value
+"""
+        config = load_config_from_string(yaml)
+        matcher = Matcher(config)
+        tokens = tokenize("-fsanitize=leak")
+
+        result = matcher.match_token(tokens[0])
+
+        # "flag" comes from regexp, "name" and "value" from capture_groups
+        assert result.get_group("flag").value == "-f"
+        assert result.get_group("name").value == "sanitize="
+        assert result.get_group("value").value == "leak"
+
+

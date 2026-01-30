@@ -108,6 +108,11 @@ class Flag(BaseModel):
 
     category: str = Field(description="Category name, e.g., 'Includes'")
     regexps: list[str] = Field(default_factory=list, description="Regex patterns with capture groups")
+    capture_groups: list[str] = Field(
+        default_factory=list,
+        description="Names for capture groups (e.g., ['flag', 'name', 'value']). "
+        "Used when regexp groups aren't named with (?P<name>...) syntax.",
+    )
     validator: dict[str, Any] | None = Field(default=None, description="Validator configuration")
     help: list[FlagHelp] = Field(default_factory=list, description="Help entries for this flag")
 
@@ -117,10 +122,32 @@ class Flag(BaseModel):
 
 
 class Category(BaseModel):
-    """Category definition with colors for capture groups."""
+    """Category definition with colors for capture groups.
+
+    Colors can be specified as:
+    - A dict mapping group names to colors: {"flag": "red", "value": "cyan"}
+    - A list for backward compatibility: ["red", "cyan"] (applied to groups in order)
+    """
 
     name: str = Field(default="", description="Category name")
-    colors: list[str] = Field(default_factory=list, description="Colors for capture groups")
+    colors: dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of capture group name to color (e.g., {'flag': 'red', 'value': 'cyan'})",
+    )
+
+    @field_validator("colors", mode="before")
+    @classmethod
+    def parse_colors(cls, v: dict[str, str] | list[str] | None) -> dict[str, str]:
+        """Parse colors from list or dict format."""
+        if v is None:
+            return {}
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, list):
+            # Convert list to dict with numeric keys for backward compatibility
+            # ["red", "cyan"] -> {"0": "red", "1": "cyan"}
+            return {str(i): color for i, color in enumerate(v)}
+        return {}
 
 
 class CategoryMap(BaseModel):

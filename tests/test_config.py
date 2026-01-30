@@ -70,7 +70,22 @@ categories:
         config = load_config_from_string(yaml)
 
         assert "includes" in config.categories
-        assert config.categories["includes"].colors == ["blue"]
+        # List colors are converted to dict with numeric keys
+        assert config.categories["includes"].colors == {"0": "blue"}
+
+    def test_load_with_named_colors(self):
+        """Test loading configuration with named color groups."""
+        yaml = """
+categories:
+  Includes:
+    colors:
+      flag: blue
+      path: cyan
+"""
+        config = load_config_from_string(yaml)
+
+        assert "includes" in config.categories
+        assert config.categories["includes"].colors == {"flag": "blue", "path": "cyan"}
 
     def test_load_with_flags(self):
         """Test loading configuration with flags."""
@@ -84,6 +99,23 @@ flags:
 
         assert len(config.flags) == 1
         assert config.flags[0].category == "Includes"
+
+    def test_load_with_capture_groups(self):
+        """Test loading flags with capture_groups for naming."""
+        yaml = """
+flags:
+  - category: Sanitizers
+    regexps:
+      - "(-f)(sanitize=)(.*)"
+    capture_groups:
+      - flag
+      - name
+      - value
+"""
+        config = load_config_from_string(yaml)
+
+        assert len(config.flags) == 1
+        assert config.flags[0].capture_groups == ["flag", "name", "value"]
 
     def test_load_with_programs(self):
         """Test loading configuration with programs."""

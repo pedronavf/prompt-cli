@@ -130,7 +130,7 @@ class Matcher:
             for pattern, flag in patterns:
                 match = pattern.match(token.value)
                 if match:
-                    groups = self._extract_groups(match, token)
+                    groups = self._extract_groups(match, token, flag)
                     return MatchResult(
                         token=token,
                         category=flag.category,  # Use original case from flag
@@ -155,27 +155,53 @@ class Matcher:
             matched=False,
         )
 
-    def _extract_groups(self, match: re.Match[str], token: Token) -> list[CaptureGroup]:
+    def _extract_groups(
+        self, match: re.Match[str], token: Token, flag: Flag | None = None
+    ) -> list[CaptureGroup]:
         """Extract capture groups from a regex match.
 
-        Supports both numeric and named capture groups.
-        Named groups like (?P<flag>...) will have their name stored.
+        Supports both named and numeric capture groups.
+        Group names are determined in this order:
+        1. Named groups in regexp: (?P<flag>...) -> name from regexp
+        2. capture_groups in flag config: ["flag", "name", "value"] -> name by index
+        3. Numeric fallback: group_index as string ("1", "2", etc.)
+
+        Args:
+            match: The regex match object
+            token: The matched token
+            flag: Optional flag config with capture_groups names
+
+        Returns:
+            List of CaptureGroup objects with names assigned
         """
         groups: list[CaptureGroup] = []
 
-        # Get named groups mapping: name -> group_index
-        # The pattern object stores group names
-        named_groups = match.re.groupindex  # dict of name -> group_number
+        # Get named groups from regexp: name -> group_index
+        regexp_named_groups = match.re.groupindex  # dict of name -> group_number
 
         # Invert to get group_number -> name
-        index_to_name: dict[int, str] = {v: k for k, v in named_groups.items()}
+        index_to_name: dict[int, str] = {v: k for k, v in regexp_named_groups.items()}
+
+        # Get capture_groups from flag config if available
+        flag_group_names: list[str] = []
+        if flag and flag.capture_groups:
+            flag_group_names = flag.capture_groups
 
         # Extract all capture groups
         for i, group_value in enumerate(match.groups(), start=1):
             if group_value is not None:
                 start = match.start(i)
                 end = match.end(i)
-                name = index_to_name.get(i)  # None if not a named group
+
+                # Determine name: regexp named > flag capture_groups > None
+                name: str | None = None
+                if i in index_to_name:
+                    # Named group in regexp
+                    name = index_to_name[i]
+                elif flag_group_names and i - 1 < len(flag_group_names):
+                    # Name from flag capture_groups (0-indexed for the list)
+                    name = flag_group_names[i - 1]
+
                 groups.append(
                     CaptureGroup(
                         value=group_value,

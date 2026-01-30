@@ -81,13 +81,20 @@ config:
 
 categories:
   Includes:
-    colors: ["blue", "bright cyan"]
+    colors:
+      flag: blue
+      path: bright cyan
   Libraries:
-    colors: ["magenta"]
+    colors:
+      flag: magenta
+      path: bright magenta
   Output:
-    colors: ["green"]
+    colors:
+      flag: green
+      file: bright green
   Default:
-    colors: ["white"]
+    colors:
+      "0": white
 
 flags:
   - category: Includes
@@ -100,5 +107,34 @@ flags:
   - category: Output
     regexps:
       - "(?P<flag>-o)(?P<file>.*)"
+"""
+    return load_config_from_string(yaml_content)
+
+
+@pytest.fixture
+def capture_groups_config() -> Config:
+    """Configuration with capture_groups array (no named regexp groups)."""
+    yaml_content = """
+config:
+  color: true
+
+categories:
+  Sanitizers:
+    colors:
+      flag: red
+      name: yellow
+      value: cyan
+  Default:
+    colors:
+      "0": white
+
+flags:
+  - category: Sanitizers
+    regexps:
+      - "(-f)(sanitize=)(.*)"
+    capture_groups:
+      - flag
+      - name
+      - value
 """
     return load_config_from_string(yaml_content)

@@ -3,9 +3,11 @@
 import pytest
 
 from prompt_cli.core.programs import (
+    CommandLineParts,
     detect_program,
     find_compiler,
     get_program_names,
+    parse_command_line,
     _match_builtin,
     _match_config,
     _is_launcher,
@@ -282,3 +284,96 @@ class TestFindCompiler:
         assert result.canonical_name == "my-custom-tool"
         assert result.source == "unknown"
         assert result.token_index == 0
+
+
+class TestParseCommandLine:
+    """Tests for parse_command_line function."""
+
+    def _make_tokens(self, values: list[str]) -> list[Token]:
+        """Helper to create tokens from string values."""
+        tokens = []
+        pos = 0
+        for value in values:
+            tokens.append(Token(value=value, start=pos, end=pos + len(value), quote_type=QuoteType.NONE, raw=value))
+            pos += len(value) + 1
+        return tokens
+
+    def test_simple_command(self, sample_config):
+        """Test parsing simple command without launcher."""
+        tokens = self._make_tokens(["gcc", "-O2", "foo.c"])
+        parts = parse_command_line(tokens, sample_config)
+
+        assert parts.launcher == ""
+        assert parts.launcher_parameters == ""
+        assert parts.program == "gcc"
+        assert parts.program_parameters == "-O2 foo.c"
+        assert not parts.has_launcher
+
+    def test_command_with_launcher(self, sample_config):
+        """Test parsing command with ccache launcher."""
+        tokens = self._make_tokens(["ccache", "gcc", "-O2", "foo.c"])
+        parts = parse_command_line(tokens, sample_config)
+
+        assert parts.launcher == "ccache"
+        assert parts.launcher_parameters == ""
+        assert parts.program == "gcc"
+        assert parts.program_parameters == "-O2 foo.c"
+        assert parts.has_launcher
+
+    def test_launcher_with_parameters(self, sample_config):
+        """Test parsing command with launcher that has parameters."""
+        tokens = self._make_tokens(["/usr/bin/ccache", "-a", "--foo", "/usr/local/gcc", "-L/tmp", "-I/tmp", "foo.c"])
+        parts = parse_command_line(tokens, sample_config)
+
+        # ccache skips flags (starting with -) until it finds a non-flag token
+        # So -a and --foo are treated as launcher parameters (flags)
+        # and /usr/local/gcc is detected as the program
+        assert parts.launcher == "/usr/bin/ccache"
+        assert parts.launcher_parameters == "-a --foo"
+        assert parts.program == "/usr/local/gcc"
+        assert parts.program_parameters == "-L/tmp -I/tmp foo.c"
+
+    def test_cross_compiler_with_launcher(self, sample_config):
+        """Test parsing cross-compiler with launcher."""
+        tokens = self._make_tokens(["ccache", "arm-linux-gnueabihf-gcc", "-O2"])
+        parts = parse_command_line(tokens, sample_config)
+
+        assert parts.launcher == "ccache"
+        assert parts.program == "arm-linux-gnueabihf-gcc"
+        assert parts.program_parameters == "-O2"
+
+    def test_full_paths(self, sample_config):
+        """Test parsing with full paths."""
+        tokens = self._make_tokens(["/usr/bin/ccache", "/usr/bin/gcc", "-O2", "foo.c"])
+        parts = parse_command_line(tokens, sample_config)
+
+        assert parts.launcher == "/usr/bin/ccache"
+        assert parts.program == "/usr/bin/gcc"
+        assert parts.program_parameters == "-O2 foo.c"
+
+    def test_empty_tokens(self, sample_config):
+        """Test with empty token list."""
+        parts = parse_command_line([], sample_config)
+
+        assert parts.launcher == ""
+        assert parts.program == ""
+        assert parts.program_parameters == ""
+
+    def test_as_dict(self, sample_config):
+        """Test as_dict method returns named parts."""
+        tokens = self._make_tokens(["ccache", "gcc", "-O2"])
+        parts = parse_command_line(tokens, sample_config)
+
+        d = parts.as_dict()
+        assert d["launcher"] == "ccache"
+        assert d["launcherParameters"] == ""
+        assert d["program"] == "gcc"
+        assert d["programParameters"] == "-O2"
+
+    def test_program_only_no_args(self, sample_config):
+        """Test with just program and no arguments."""
+        tokens = self._make_tokens(["gcc"])
+        parts = parse_command_line(tokens, sample_config)
+
+        assert parts.program == "gcc"
+        assert parts.program_parameters == ""

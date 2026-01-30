@@ -126,6 +126,48 @@ class ProgramMatch:
     launcher: LauncherInfo | None = None  # Launcher if present
 
 
+@dataclass
+class CommandLineParts:
+    """Parsed command line with named parts.
+
+    For a command like:
+        /usr/bin/ccache -a --foo /usr/local/gcc -L/tmp -I/tmp foo.c
+
+    The parts are:
+        launcher: "/usr/bin/ccache"
+        launcher_parameters: "-a --foo"
+        program: "/usr/local/gcc"
+        program_parameters: "-L/tmp -I/tmp foo.c"
+
+    All parts can be empty strings if not present.
+    """
+
+    launcher: str = ""  # The launcher executable (e.g., "/usr/bin/ccache")
+    launcher_parameters: str = ""  # Launcher arguments (e.g., "-a --foo")
+    program: str = ""  # The actual program (e.g., "/usr/local/gcc")
+    program_parameters: str = ""  # Program arguments (e.g., "-L/tmp -I/tmp foo.c")
+
+    # Token index ranges for each part (start, end) - useful for highlighting
+    launcher_range: tuple[int, int] = (0, 0)
+    launcher_parameters_range: tuple[int, int] = (0, 0)
+    program_range: tuple[int, int] = (0, 0)
+    program_parameters_range: tuple[int, int] = (0, 0)
+
+    @property
+    def has_launcher(self) -> bool:
+        """Check if a launcher is present."""
+        return bool(self.launcher)
+
+    def as_dict(self) -> dict[str, str]:
+        """Return parts as a dictionary with named groups."""
+        return {
+            "launcher": self.launcher,
+            "launcherParameters": self.launcher_parameters,
+            "program": self.program,
+            "programParameters": self.program_parameters,
+        }
+
+
 def _match_builtin(basename: str) -> str | None:
     """Try to match against built-in program patterns.
 
@@ -372,3 +414,70 @@ def get_program_names(config: Config | None = None) -> list[str]:
                     names.add(alias)
 
     return sorted(names)
+
+
+def parse_command_line(
+    tokens: list[Token], config: Config | None = None
+) -> CommandLineParts:
+    """Parse a command line into its named parts.
+
+    Analyzes the tokens to identify:
+    - launcher: The launcher executable (ccache, distcc, etc.)
+    - launcher_parameters: Arguments to the launcher
+    - program: The actual program/compiler
+    - program_parameters: Arguments to the program
+
+    Example:
+        "/usr/bin/ccache -a --foo /usr/local/gcc -L/tmp -I/tmp foo.c"
+        ->
+        launcher="/usr/bin/ccache"
+        launcher_parameters="-a --foo"
+        program="/usr/local/gcc"
+        program_parameters="-L/tmp -I/tmp foo.c"
+
+    Args:
+        tokens: List of command line tokens
+        config: Optional configuration object
+
+    Returns:
+        CommandLineParts with all parts populated
+    """
+    if not tokens:
+        return CommandLineParts()
+
+    # Use find_compiler to detect launcher and program
+    program_match = find_compiler(tokens, config)
+
+    if not program_match:
+        # No program found - return empty
+        return CommandLineParts()
+
+    parts = CommandLineParts()
+
+    # Check if there's a launcher
+    if program_match.launcher:
+        launcher_idx = program_match.launcher.token_index
+        launcher_end = program_match.launcher.args_end_index
+
+        # Launcher executable
+        parts.launcher = tokens[launcher_idx].value
+        parts.launcher_range = (launcher_idx, launcher_idx + 1)
+
+        # Launcher parameters (tokens between launcher and program)
+        if launcher_end > launcher_idx + 1:
+            launcher_param_tokens = tokens[launcher_idx + 1:launcher_end]
+            parts.launcher_parameters = " ".join(t.value for t in launcher_param_tokens)
+            parts.launcher_parameters_range = (launcher_idx + 1, launcher_end)
+
+    # Program executable
+    program_idx = program_match.token_index
+    parts.program = tokens[program_idx].value
+    parts.program_range = (program_idx, program_idx + 1)
+
+    # Program parameters (everything after program)
+    if program_idx + 1 < len(tokens):
+        program_param_tokens = tokens[program_idx + 1:]
+        parts.program_parameters = " ".join(t.value for t in program_param_tokens)
+        parts.program_parameters_range = (program_idx + 1, len(tokens))
+
+    return parts
