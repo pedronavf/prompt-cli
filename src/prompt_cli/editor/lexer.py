@@ -15,6 +15,7 @@ from prompt_cli.core.tokenizer import tokenize
 
 if TYPE_CHECKING:
     from prompt_cli.config.schema import Config, Theme
+    from prompt_cli.editor.prompt import CommandLineEditor
 
 
 class CommandLineLexer(Lexer):
@@ -25,6 +26,7 @@ class CommandLineLexer(Lexer):
         config: Config,
         theme: Theme | None = None,
         executable: str | None = None,
+        editor: "CommandLineEditor | None" = None,
     ) -> None:
         """Initialize the lexer.
 
@@ -32,10 +34,12 @@ class CommandLineLexer(Lexer):
             config: Configuration object
             theme: Theme to use for colors
             executable: Executable name for program-specific matching
+            editor: Editor instance (for duplicates mode awareness)
         """
         self.config = config
         self.theme = theme or config.get_theme()
         self.executable = executable
+        self.editor = editor
         self.matcher = Matcher(config, executable)
         self.color_parser = ColorParser()
 
@@ -60,6 +64,26 @@ class CommandLineLexer(Lexer):
         if self.theme.default:
             parsed = self.color_parser.parse(self.theme.default)
             styles["class:default"] = parsed.to_prompt_toolkit_style()
+
+        # Add duplicates mode styles
+        styles["class:duplicate"] = "bg:ansiyellow"
+        styles["class:duplicate-current"] = "bg:ansired bold"
+        styles["class:duplicate-selected"] = "bg:ansigreen"
+        styles["class:duplicate-dim"] = "fg:ansibrightblack"
+
+        # Check if theme has custom duplicate styles
+        if "ui:duplicates" in self.theme.categories:
+            parsed = self.color_parser.parse(self.theme.categories["ui:duplicates"])
+            styles["class:duplicate"] = parsed.to_prompt_toolkit_style()
+        if "ui:duplicates-current" in self.theme.categories:
+            parsed = self.color_parser.parse(self.theme.categories["ui:duplicates-current"])
+            styles["class:duplicate-current"] = parsed.to_prompt_toolkit_style()
+        if "ui:duplicates-selected" in self.theme.categories:
+            parsed = self.color_parser.parse(self.theme.categories["ui:duplicates-selected"])
+            styles["class:duplicate-selected"] = parsed.to_prompt_toolkit_style()
+        if "ui:duplicates-dim" in self.theme.categories:
+            parsed = self.color_parser.parse(self.theme.categories["ui:duplicates-dim"])
+            styles["class:duplicate-dim"] = parsed.to_prompt_toolkit_style()
 
         return styles
 
@@ -112,7 +136,18 @@ class CommandLineLexer(Lexer):
         styled: StyleAndTextTuples = []
         last_end = 0
 
-        for result in results:
+        # Get duplicates mode state if available
+        dup_mode = self.editor.duplicates_mode if self.editor else None
+        dup_indices: set[int] = set()
+        dup_current: int | None = None
+        dup_selected: set[int] = set()
+
+        if dup_mode:
+            dup_indices = dup_mode.get_highlighted_indices()
+            dup_current = dup_mode.get_current_index()
+            dup_selected = dup_mode.get_selected_indices()
+
+        for i, result in enumerate(results):
             token = result.token
 
             # Add any whitespace before this token
@@ -122,6 +157,25 @@ class CommandLineLexer(Lexer):
 
             # Get style for this token's category
             category = result.category
+
+            # Check duplicates mode - override styling for duplicate tokens
+            if dup_mode and i in dup_indices:
+                if i == dup_current:
+                    # Current duplicate - highlight prominently
+                    styled.append(("class:duplicate-current", token.raw))
+                elif i in dup_selected:
+                    # Selected duplicate group
+                    styled.append(("class:duplicate-selected", token.raw))
+                else:
+                    # Other duplicate
+                    styled.append(("class:duplicate", token.raw))
+                last_end = token.end
+                continue
+            elif dup_mode:
+                # In duplicates mode but not a duplicate - dim it
+                styled.append(("class:duplicate-dim", token.raw))
+                last_end = token.end
+                continue
 
             # Check lights-off mode
             if self.lights_off:

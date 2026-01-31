@@ -51,11 +51,12 @@ class CommandLineEditor:
         tokens = tokenize(command_line)
         self._executable = tokens[0].value if tokens else None
 
-        # Create lexer
+        # Create lexer (pass self for duplicates mode awareness)
         self.lexer = CommandLineLexer(
             config=self.config,
             theme=self.theme,
             executable=self._executable,
+            editor=self,
         )
 
         # Create completer

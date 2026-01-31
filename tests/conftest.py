@@ -58,6 +58,23 @@ keybindings:
     ctrl-a: move-line-start
     ctrl-e: move-line-end
     ctrl-q: quit -p
+    ctrl-d: show-duplicates
+  duplicates:
+    left: duplicate-prev
+    right: duplicate-next
+    up: duplicate-previous-group
+    down: duplicate-next-group
+    space: duplicate-select
+    s: duplicate-select
+    d: duplicate-deselect
+    a: duplicate-all
+    n: duplicate-none
+    k: duplicates-keep
+    x: duplicates-delete
+    f: duplicates-first
+    escape: duplicates-exit
+    enter: duplicates-exit
+    q: duplicates-exit
 
 aliases:
   q: quit
