@@ -85,6 +85,18 @@ class CommandLineLexer(Lexer):
             parsed = self.color_parser.parse(self.theme.categories["ui:duplicates-dim"])
             styles["class:duplicate-dim"] = parsed.to_prompt_toolkit_style()
 
+        # Add lights-off mode styles
+        styles["class:lights-off-dim"] = "fg:ansibrightblack"
+        styles["class:lights-off-highlight"] = "bold"
+
+        # Check if theme has custom lights-off styles
+        if "ui:lights-off-dim" in self.theme.categories:
+            parsed = self.color_parser.parse(self.theme.categories["ui:lights-off-dim"])
+            styles["class:lights-off-dim"] = parsed.to_prompt_toolkit_style()
+        if "ui:lights-off-highlight" in self.theme.categories:
+            parsed = self.color_parser.parse(self.theme.categories["ui:lights-off-highlight"])
+            styles["class:lights-off-highlight"] = parsed.to_prompt_toolkit_style()
+
         return styles
 
     def _category_to_class(self, category: str) -> str:
@@ -180,12 +192,18 @@ class CommandLineLexer(Lexer):
             # Check lights-off mode
             if self.lights_off:
                 if self.lights_off_category:
-                    # Only highlight matching category
+                    # Only highlight matching category, dim everything else
                     if category.lower() != self.lights_off_category.lower():
-                        category = "ui:lights-off-dim"
+                        styled.append(("class:lights-off-dim", token.raw))
+                        last_end = token.end
+                        continue
+                    # Matching category gets extra highlight
+                    # (fall through to normal styling with potential highlight)
                 else:
-                    # Dim everything except current token
-                    pass  # TODO: implement cursor position tracking
+                    # No category specified - dim everything
+                    styled.append(("class:lights-off-dim", token.raw))
+                    last_end = token.end
+                    continue
 
             # Style the token based on capture groups
             if result.groups:
